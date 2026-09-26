@@ -43,6 +43,7 @@ function ImagePanel({item, side}) {
 }
 function App(){
   const [session, setSession] = useState(loadSession);
+  const [showHome, setShowHome] = useState(false);
   const [storageWarning, setStorageWarning] = useState('');
   const [submissionState, setSubmissionState] = useState(session.receipt ? 'success' : 'idle');
   const [submissionError, setSubmissionError] = useState('');
@@ -87,13 +88,22 @@ function App(){
     const rec={timestamp:new Date().toISOString(),sample_id:current.id,question_id:question.id,question:question.text,left_method:current.left.method,right_method:current.right.method,response:choice,preferred_method:pickedMethod,response_time_ms:Date.now()-trialStart};
     persist({ ...session, records: [...records, rec] }); setChoice(''); setTrialStart(Date.now());
   };
-  if(!started) return <main className="shell intro"><div className="eyebrow">HUMAN EVALUATION</div><h1>{studyConfig.title}</h1><p>{studyConfig.intro}</p><div className="info"><b>{trials.length}</b> comparisons · <b>{studyConfig.questions.length}</b> criterion/criteria · randomized presentation</div><p className="note">Your responses will be submitted automatically when you finish.</p><button className="primary" onClick={()=>{persist({ ...session, started: true });setTrialStart(Date.now())}}>Start study</button></main>;
+  if(!started || showHome) return <main className="shell intro">
+    <div className="eyebrow">HUMAN EVALUATION</div><h1>{studyConfig.title}</h1><p>{studyConfig.intro}</p>
+    <div className="info"><b>{trials.length}</b> comparisons · <b>{studyConfig.questions.length}</b> criterion/criteria · randomized presentation</div>
+    <p className="note">{session.receipt ? 'You have completed this study. Your responses have been saved.' : 'Your responses will be submitted automatically when you finish.'}</p>
+    <button className="primary" onClick={()=>{
+      setShowHome(false);
+      if (!session.receipt) { persist({ ...session, started: true }); setTrialStart(Date.now()); }
+    }}>{session.receipt ? 'View submission' : 'Start study'}</button>
+  </main>;
   if(done) return <main className="shell intro">
     <div className="check">{submissionState === 'success' ? '✓' : '↑'}</div>
     <h1>{submissionState === 'success' ? 'Thank you.' : submissionState === 'error' ? 'Submission pending.' : 'Submitting responses…'}</h1>
     <div role="status" aria-live="polite"><p>{submissionState === 'success' ? 'Your responses have been saved. You can close this page.' : submissionState === 'error' ? 'Your answers are still here. Please retry to finish the study.' : 'Please keep this page open while we save your responses.'}</p></div>
     {submissionState === 'error' && <><p role="alert" className="error">{submissionError}</p><button className="primary" onClick={()=>{setSubmissionState('sending');setRetryCount(n=>n+1)}}>Retry submission</button></>}
     {submissionState === 'success' && <p className="note">Submission ID: {session.submissionId}</p>}
+    {submissionState === 'success' && <button className="primary" onClick={()=>setShowHome(true)}>Back to home</button>}
     {storageWarning && submissionState !== 'success' && <p role="alert" className="note">{storageWarning}</p>}
   </main>;
   return <main className="shell">
