@@ -26,7 +26,7 @@ test('submission API and durable database', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'pairwise-test-'));
   const databasePath = join(directory, 'study.sqlite');
   const store = openStore(databasePath);
-  const server = createApp({ store, allowedOrigins: ['https://study.example'] });
+  const server = createApp({ store, allowedOrigins: ['https://Study.Example:443/', 'https://HuQyang.github.io/'] });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -94,6 +94,24 @@ test('submission API and durable database', async t => {
     assert.equal((await fetch(`${base}/api/submissions`, { method: 'POST', body: 'hello' })).status, 415);
     const res = await post({ padding: 'x'.repeat(1024 * 1024) });
     assert.equal(res.status, 413);
+  });
+
+  await t.test('accepts canonical browser origins without allowing lookalike domains', async () => {
+    const origin = 'https://huqyang.github.io';
+    const options = await fetch(`${base}/api/submissions`, {
+      method: 'OPTIONS',
+      headers: { Origin: origin, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type' },
+    });
+    assert.equal(options.status, 204);
+    assert.equal(options.headers.get('access-control-allow-origin'), origin);
+    const saved = await post(payload(), { Origin: origin });
+    assert.equal(saved.status, 201);
+    assert.equal(saved.headers.get('access-control-allow-origin'), origin);
+    for (const disallowed of ['https://huqyang.github.io.evil.example', 'http://huqyang.github.io', 'https://huqyang.github.io:8443']) {
+      const rejected = await post(payload(), { Origin: disallowed });
+      assert.equal(rejected.status, 403);
+      assert.equal(rejected.headers.get('access-control-allow-origin'), null);
+    }
   });
 
   await t.test('browser submission helper accepts a real receipt and retry is idempotent', async () => {

@@ -7,6 +7,15 @@ const MAX_BODY_BYTES = 1024 * 1024;
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.ico': 'image/x-icon' };
 
 export function createApp({ store, allowedOrigins = [], distDir = resolve('dist') }) {
+  // URL origins canonicalize hostname casing, default ports, and trailing slashes.
+  // Keep an exact origin allowlist; never use substring or wildcard matching.
+  const allowedOriginSet = new Set(allowedOrigins.map(value => {
+    const url = new URL(value.trim());
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+      throw new Error('ALLOWED_ORIGINS must contain HTTP(S) origins without credentials.');
+    }
+    return url.origin;
+  }));
   const json = (res, status, body) => {
     res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(body));
@@ -20,7 +29,7 @@ export function createApp({ store, allowedOrigins = [], distDir = resolve('dist'
         const origin = req.headers.origin;
         // Same-origin requests work without configuration; remote frontends need an allowlist.
         const sameOrigin = origin === `http://${req.headers.host}` || origin === `https://${req.headers.host}`;
-        if (origin && !sameOrigin && !allowedOrigins.includes(origin)) throw new RequestError(403, 'Origin is not allowed.');
+        if (origin && !sameOrigin && !allowedOriginSet.has(origin)) throw new RequestError(403, 'Origin is not allowed.');
         if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
         if (req.method === 'OPTIONS') {
           res.writeHead(204, { 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
