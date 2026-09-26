@@ -50,11 +50,20 @@ The backend serves both `/api/submissions` and the built frontend from `dist/`. 
 
 ## Keep the frontend on GitHub Pages
 
-GitHub Pages hosts static files and cannot run this backend. Deploy the Node server separately with persistent storage, then:
+GitHub Pages hosts static files and cannot run this backend. The `.github/workflows/pages.yml` workflow builds and publishes the frontend on every push to `main`; no `gh-pages` branch is needed.
+
+One-time setup in the GitHub repository:
+
+1. Open **Settings → Pages → Build and deployment → Source** and select **GitHub Actions**.
+2. Under **Settings → Secrets and variables → Actions → Variables**, add the repository variable `VITE_API_BASE_URL` with the HTTPS URL of your deployed backend. GitHub Actions does not read your local `.env`.
+3. Push to `main`, or select **Actions → Deploy survey to GitHub Pages → Run workflow**. The workflow installs dependencies, runs tests, builds `dist/`, and uploads only that directory.
+4. After the first successful Actions deployment, the old `gh-pages` branch can be removed. Do not merge its built HTML/assets into the source directory.
+
+Deploy the Node server separately with persistent storage, then:
 
 1. Set `ALLOWED_ORIGINS=https://YOUR-USERNAME.github.io` on the backend (origin only, no repository path). Multiple origins can be comma-separated. Restart the backend after changes.
-2. Set `VITE_API_BASE_URL=https://YOUR-BACKEND.example.com` in the frontend `.env` **before building**. This public URL contains no credentials.
-3. Keep `base: '/pairwise_human_study/'` in `vite.config.js` consistent with your repository name, then run `npm run deploy`.
+2. Set the GitHub Actions repository variable `VITE_API_BASE_URL` described above. This public URL contains no credentials. For local builds, set it in `.env` before building instead.
+3. Keep `base: '/pairwise_human_study/'` in `vite.config.js` consistent with your repository name, then commit and push to `main`. Publishing no longer uses `npm run deploy` or writes a separate branch.
 
 The frontend sends `POST /api/submissions` to that backend over HTTPS. For same-origin hosting, leave `VITE_API_BASE_URL` unset. `GET /api/health` checks API availability. CORS restricts browser origins; the anonymous submission endpoint is public. If collecting a public study at scale, configure request rate limits at your reverse proxy.
 
