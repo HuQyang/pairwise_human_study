@@ -1,6 +1,9 @@
 // Edit this file to add your real study samples.
 // image can be a path like "/images/sample01-a.png" after placing files in public/images.
 export const studyConfig = {
+  id: "pairwise-human-study",
+  // Increment whenever questions, comparisons, or methods change.
+  version: "1",
   title: "Pairwise Human Evaluation",
   intro: "You will see two results generated from the same input. Please select the result you prefer according to the criterion shown. There are no right or wrong answers.",
   allowTie: true,

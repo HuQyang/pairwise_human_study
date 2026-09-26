@@ -4,11 +4,16 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev.js",
+    "dev:client": "vite",
+    "start": "node --env-file-if-exists=.env server/index.js",
+    "test": "node --test",
+    "export:results": "node --env-file-if-exists=.env scripts/export-results.js",
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "npm run build && gh-pages -d dist"
   },
+  "engines": { "node": ">=22.13.0" },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
     "vite": "latest",
