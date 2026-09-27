@@ -96,14 +96,22 @@ function App(){
     const rec={timestamp:new Date().toISOString(),sample_id:current.id,question_id:question.id,question:question.text,left_method:current.left.method,right_method:current.right.method,response:choice,preferred_method:pickedMethod,response_time_ms:Date.now()-trialStart};
     persist({ ...session, records: [...records, rec] }); setChoice(''); setTrialStart(Date.now());
   };
+  const startStudy = () => {
+    // A completed survey stays in the database; another run gets its own identity.
+    const next = session.receipt ? createSession() : session;
+    persist({ ...next, started: true });
+    setChoice('');
+    setSubmissionState('idle');
+    setSubmissionError('');
+    setRetryCount(0);
+    setTrialStart(Date.now());
+    setShowHome(false);
+  };
   if(!started || showHome) return <main className="shell intro">
     <div className="eyebrow">HUMAN EVALUATION</div><h1>{studyConfig.title}</h1><p>{studyConfig.intro}</p>
     <div className="info"><b>{trials.length}</b> comparisons · <b>{studyConfig.questions.length}</b> criterion/criteria · randomized presentation</div>
-    <p className="note">{session.receipt ? 'You have completed this study. Your responses have been saved.' : 'Your responses will be submitted automatically when you finish.'}</p>
-    <button className="primary" onClick={()=>{
-      setShowHome(false);
-      if (!session.receipt) { persist({ ...session, started: true }); setTrialStart(Date.now()); }
-    }}>{session.receipt ? 'View submission' : 'Start study'}</button>
+    <p className="note">{session.receipt ? 'Your previous responses have been saved. You can start a new study.' : 'Your responses will be submitted automatically when you finish.'}</p>
+    <button className="primary" onClick={startStudy}>{session.receipt ? 'Start new study' : 'Start study'}</button>
   </main>;
   if(done) return <main className="shell intro">
     <div className="check">{submissionState === 'success' ? '✓' : '↑'}</div>

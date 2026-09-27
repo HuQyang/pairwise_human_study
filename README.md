@@ -14,7 +14,7 @@ npm run dev
 
 Open the Vite URL printed in the terminal, normally `http://localhost:5173/pairwise_human_study/`. This starts both Vite and the API on port 3001; Vite proxies `/api` to the backend.
 
-Answers and randomized presentation order are saved in the participant's browser after each step. Refreshing resumes the survey. Completing the final question submits the full response set. A failed submission keeps the answers and offers **Retry submission**; refreshing a pending completed survey retries automatically. If browser storage is disabled, participants are asked to keep the page open. Only a confirmed database save shows the thank-you message. One completed submission is retained per browser and study version; for another test run, clear this site's local storage or use a fresh browser profile.
+Answers and randomized presentation order are saved in the participant's browser after each step. Refreshing resumes the survey. Completing the final question submits the full response set. A failed submission keeps the answers and offers **Retry submission**; refreshing a pending completed survey retries automatically. If browser storage is disabled, participants are asked to keep the page open. Only a confirmed database save shows the thank-you message. After a successful submission, choose **Back to home → Start new study** to begin another run. This generates a new submission ID and randomized presentation, resets browser progress, and preserves previously submitted responses in the database. A refresh continues the current run instead of creating another one.
 
 ## Study content
 
