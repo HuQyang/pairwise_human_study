@@ -5,11 +5,16 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { PGlite } from '@electric-sql/pglite';
+import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
 import { openStore } from './store.js';
 import { createApp } from './app.js';
 import { studyConfig } from '../src/studyConfig.js';
 import { sendSubmission } from '../src/submission.js';
+
+const execFileAsync = promisify(execFile);
 
 function payload() {
   return {
@@ -22,10 +27,33 @@ function payload() {
   };
 }
 
-test('submission API and durable database', async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'pairwise-test-'));
-  const databasePath = join(directory, 'study.sqlite');
-  const store = openStore(databasePath);
+// Every backend runs the same suite. Postgres is exercised through PGlite's wire-protocol server.
+const backends = [
+  {
+    name: 'SQLite',
+    async setup() {
+      const directory = mkdtempSync(join(tmpdir(), 'pairwise-test-'));
+      const target = join(directory, 'study.sqlite');
+      return { target, options: {}, exportEnv: { DATABASE_PATH: target }, cleanup: async () => rmSync(directory, { recursive: true, force: true }) };
+    },
+  },
+  {
+    name: 'Postgres',
+    async setup() {
+      const db = await PGlite.create();
+      const pgServer = new PGLiteSocketServer({ db, port: 0, host: '127.0.0.1', maxConnections: 4 });
+      await pgServer.start();
+      const target = `postgres://postgres@${pgServer.getServerConn()}/postgres`;
+      // PGlite is one session underneath, so the app pool uses one connection to keep transactions separate.
+      return { target, options: { maxConnections: 1 }, exportEnv: { DATABASE_URL: target }, cleanup: async () => { await pgServer.stop(); await db.close(); } };
+    },
+  },
+];
+
+for (const backend of backends) test(`submission API and durable database (${backend.name})`, async t => {
+  const { target, options, exportEnv, cleanup } = await backend.setup();
+  const store = await openStore(target, options);
+  const rowsFor = async id => (await store.exportRows()).filter(r => r.submission_id === id).sort((a, b) => a.answer_order - b.answer_order);
   const server = createApp({ store, allowedOrigins: ['https://Study.Example:443/', 'https://HuQyang.github.io/'] });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -35,8 +63,8 @@ test('submission API and durable database', async t => {
   });
   t.after(async () => {
     await new Promise(resolve => server.close(resolve));
-    store.close();
-    rmSync(directory, { recursive: true, force: true });
+    await store.close();
+    await cleanup();
   });
 
   await t.test('saves all responses and derives question/method on the server', async () => {
@@ -46,7 +74,7 @@ test('submission API and durable database', async t => {
     const receipt = await res.json();
     assert.equal(receipt.submission_id, body.submission_id);
     assert.ok(receipt.received_at);
-    const rows = store.db.prepare('SELECT * FROM responses WHERE submission_id = ? ORDER BY answer_order').all(body.submission_id);
+    const rows = await rowsFor(body.submission_id);
     assert.equal(rows.length, body.responses.length);
     assert.equal(rows[0].question, studyConfig.questions[0].text);
     assert.equal(rows[0].preferred_method, rows[0].left_method);
@@ -55,7 +83,7 @@ test('submission API and durable database', async t => {
     assert.equal((await retry.json()).received_at, receipt.received_at);
     body.responses[0].response = 'right';
     assert.equal((await post(body)).status, 409);
-    assert.equal(store.db.prepare('SELECT count(*) AS count FROM responses WHERE submission_id = ?').get(body.submission_id).count, rows.length);
+    assert.equal((await rowsFor(body.submission_id)).length, rows.length);
   });
 
   await t.test('rejects incomplete, duplicate, invalid and stale answers without partial writes', async () => {
@@ -72,7 +100,7 @@ test('submission API and durable database', async t => {
     for (const mutate of mutations) {
       const body = payload(); mutate(body);
       assert.equal((await post(body)).status, 400);
-      assert.equal(store.db.prepare('SELECT count(*) AS count FROM submissions WHERE id = ?').get(body.submission_id).count, 0);
+      assert.equal((await rowsFor(body.submission_id)).length, 0);
     }
     const invalid = await fetch(`${base}/api/submissions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' });
     assert.equal(invalid.status, 400);
@@ -123,11 +151,18 @@ test('submission API and durable database', async t => {
     await assert.rejects(sendSubmission({ ...session, records: [] }, studyConfig, base), /answer every question/);
   });
 
-  await t.test('survives database reopen and exports researcher CSV', () => {
-    const reopened = openStore(databasePath);
-    assert.ok(reopened.db.prepare('SELECT count(*) AS count FROM submissions').get().count >= 3);
-    reopened.close();
-    const csv = execFileSync(process.execPath, ['scripts/export-results.js'], { env: { ...process.env, DATABASE_PATH: databasePath }, encoding: 'utf8' });
+  await t.test('handles concurrent retries of one submission', async () => {
+    const body = payload();
+    const statuses = (await Promise.all([post(body), post(body), post(body)])).map(r => r.status).sort();
+    assert.deepEqual(statuses, [200, 200, 201]);
+    assert.equal((await rowsFor(body.submission_id)).length, body.responses.length);
+  });
+
+  await t.test('survives database reopen and exports researcher CSV', async () => {
+    const reopened = await openStore(target, options);
+    assert.ok(new Set((await reopened.exportRows()).map(r => r.submission_id)).size >= 3);
+    await reopened.close();
+    const { stdout: csv } = await execFileAsync(process.execPath, ['scripts/export-results.js'], { env: { ...process.env, ...exportEnv }, encoding: 'utf8' });
     assert.match(csv, /^submission_id,study_id,study_version,received_at/);
     assert.match(csv, /sample-001/);
     assert.ok(csv.trim().split('\n').length > 3);

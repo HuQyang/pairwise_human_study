@@ -1,0 +1,25 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "pairwise-study-api",
+	"main": "worker.js",
+	"compatibility_date": "2026-09-26",
+	"workers_dev": true,
+	"vars": {
+		"ALLOWED_ORIGINS": "https://huqyang.github.io"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "pairwise-study",
+			// Replace this placeholder with the database_id printed by npm run db:create.
+			"database_id": "ff964849-0797-43b6-b068-b6b37bd206ac",
+			"migrations_dir": "migrations"
+		},
+		{
+			"binding": "pairwise_study",
+			"database_name": "pairwise-study",
+			"database_id": "ff964849-0797-43b6-b068-b6b37bd206ac",
+			"remote": true
+		}
+	]
+}

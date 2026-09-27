@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { studyConfig } from './studyConfig';
 import './style.css';
-import { sendSubmission } from './submission.js';
+import { sendSubmission, wakeServer } from './submission.js';
 
 const storageKey = `pairwise-study:${studyConfig.id}:${studyConfig.version}`;
 const configSnapshot = JSON.stringify(studyConfig);
@@ -64,6 +64,14 @@ function App(){
     catch { setStorageWarning('This browser cannot save your progress locally. Keep this page open until your responses are submitted.'); }
     setSession(next);
   }
+
+  useEffect(() => {
+    if (session.receipt) return;
+    const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+    wakeServer(apiBase);
+    const timer = setInterval(() => wakeServer(apiBase), 10 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, [Boolean(session.receipt)]);
 
   useEffect(() => {
     if (!done || session.receipt) return;

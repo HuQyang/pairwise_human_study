@@ -1,0 +1,18 @@
+{
+  "name": "pairwise-study-cloudflare",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "wrangler deploy --dry-run --outdir .worker-build",
+    "test": "npm run build && node --test worker.check.js",
+    "db:create": "wrangler d1 create pairwise-study",
+    "db:migrate": "wrangler d1 migrations apply DB --remote",
+    "deploy": "wrangler deploy",
+    "db:export": "wrangler d1 export DB --remote --output=study-backup.sql"
+  },
+  "devDependencies": {
+    "miniflare": "^4.20260730.0",
+    "wrangler": "^4.142.0"
+  }
+}

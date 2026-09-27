@@ -1,6 +1,12 @@
+// Free hosts (e.g. Render) sleep when idle; pinging while the survey is open keeps the API awake.
+export function wakeServer(apiBase = '') {
+  fetch(`${apiBase.replace(/\/$/, '')}/api/health`, { cache: 'no-store' }).catch(() => {});
+}
+
 export async function sendSubmission(session, config, apiBase = '') {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+  // Allow for a sleeping server that needs close to a minute to start.
+  const timeout = setTimeout(() => controller.abort(), 60000);
   try {
     const response = await fetch(`${apiBase.replace(/\/$/, '')}/api/submissions`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

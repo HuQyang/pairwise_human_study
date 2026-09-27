@@ -17,9 +17,14 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
+    "pg": "^8.23.0",
     "react": "latest",
     "react-dom": "latest",
     "typescript": "latest",
     "vite": "latest"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@electric-sql/pglite-socket": "^0.2.11"
   }
 }

@@ -42,10 +42,22 @@ export function validateSubmission(body) {
   return { submission_id: body.submission_id.toLowerCase(), study_id: studyConfig.id, study_version: studyConfig.version, responses };
 }
 
-export function openStore(filename) {
-  if (filename !== ':memory:') mkdirSync(dirname(filename), { recursive: true });
-  const db = new DatabaseSync(filename);
-  db.exec(`
+const EXPORT_QUERY = `SELECT r.*, s.study_id, s.study_version, s.received_at
+  FROM responses r JOIN submissions s ON s.id = r.submission_id
+  ORDER BY s.received_at, s.id, r.answer_order`;
+
+const hashSubmission = body => createHash('sha256').update(JSON.stringify(body)).digest('hex');
+const responseRow = (id, r, i) => [id, i + 1, r.timestamp, r.sample_id, r.question_id, r.question, r.left_method, r.right_method, r.response, r.preferred_method, r.response_time_ms];
+
+// A postgres:// URL (e.g. Neon or Supabase) selects Postgres; anything else is a SQLite file path.
+export function openStore(target, options = {}) {
+  return /^postgres(ql)?:\/\//i.test(target) ? openPostgresStore(target, options) : openSqliteStore(target, options);
+}
+
+async function openSqliteStore(filename, { readOnly = false } = {}) {
+  if (filename !== ':memory:' && !readOnly) mkdirSync(dirname(filename), { recursive: true });
+  const db = new DatabaseSync(filename, { readOnly });
+  if (!readOnly) db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
     PRAGMA busy_timeout = 5000;
@@ -62,26 +74,82 @@ export function openStore(filename) {
       PRIMARY KEY (submission_id, sample_id, question_id)
     );
   `);
-  const insertSubmission = db.prepare('INSERT INTO submissions VALUES (?, ?, ?, ?, ?)');
-  const insertResponse = db.prepare('INSERT INTO responses VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
   return {
-    db,
-    save(raw) {
+    async save(raw) {
       const body = validateSubmission(raw);
-      const hash = createHash('sha256').update(JSON.stringify(body)).digest('hex');
+      const hash = hashSubmission(body);
       db.exec('BEGIN IMMEDIATE');
       try {
         const existing = db.prepare('SELECT received_at, payload_hash FROM submissions WHERE id = ?').get(body.submission_id);
         if (existing && existing.payload_hash !== hash) throw new RequestError(409, 'This submission ID already contains different answers.');
         const receivedAt = existing?.received_at ?? new Date().toISOString();
         if (!existing) {
-          insertSubmission.run(body.submission_id, body.study_id, body.study_version, receivedAt, hash);
-          body.responses.forEach((r, i) => insertResponse.run(body.submission_id, i + 1, r.timestamp, r.sample_id, r.question_id, r.question, r.left_method, r.right_method, r.response, r.preferred_method, r.response_time_ms));
+          db.prepare('INSERT INTO submissions VALUES (?, ?, ?, ?, ?)').run(body.submission_id, body.study_id, body.study_version, receivedAt, hash);
+          const insertResponse = db.prepare('INSERT INTO responses VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+          body.responses.forEach((r, i) => insertResponse.run(...responseRow(body.submission_id, r, i)));
         }
         db.exec('COMMIT');
         return { submission_id: body.submission_id, received_at: receivedAt, duplicate: Boolean(existing) };
       } catch (error) { db.exec('ROLLBACK'); throw error; }
     },
-    close() { db.close(); },
+    async exportRows() { return db.prepare(EXPORT_QUERY).all(); },
+    async close() { db.close(); },
+  };
+}
+
+async function openPostgresStore(connectionString, { readOnly = false, maxConnections = 5 } = {}) {
+  const { default: pg } = await import('pg');
+  const pool = new pg.Pool({ connectionString, max: maxConnections, idleTimeoutMillis: 30000, connectionTimeoutMillis: 20000 });
+  // Hosted databases close idle connections; log it instead of crashing the server.
+  pool.on('error', error => console.error('Idle database connection closed:', error.message));
+  if (!readOnly) await pool.query(`
+    CREATE TABLE IF NOT EXISTS submissions (
+      id TEXT PRIMARY KEY, study_id TEXT NOT NULL, study_version TEXT NOT NULL,
+      received_at TEXT NOT NULL, payload_hash TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS responses (
+      submission_id TEXT NOT NULL REFERENCES submissions(id),
+      answer_order INTEGER NOT NULL, timestamp TEXT NOT NULL, sample_id TEXT NOT NULL,
+      question_id TEXT NOT NULL, question TEXT NOT NULL, left_method TEXT NOT NULL,
+      right_method TEXT NOT NULL, response TEXT NOT NULL, preferred_method TEXT NOT NULL,
+      response_time_ms BIGINT NOT NULL,
+      PRIMARY KEY (submission_id, sample_id, question_id)
+    );
+  `);
+  return {
+    async save(raw) {
+      const body = validateSubmission(raw);
+      const hash = hashSubmission(body);
+      const client = await pool.connect();
+      let broken = false;
+      try {
+        await client.query('BEGIN');
+        const receivedAt = new Date().toISOString();
+        // A concurrent retry with the same ID waits on the primary key, then sees the committed row.
+        const inserted = await client.query('INSERT INTO submissions VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING',
+          [body.submission_id, body.study_id, body.study_version, receivedAt, hash]);
+        if (inserted.rowCount === 0) {
+          const { rows: [existing] } = await client.query('SELECT received_at, payload_hash FROM submissions WHERE id = $1', [body.submission_id]);
+          if (existing.payload_hash !== hash) throw new RequestError(409, 'This submission ID already contains different answers.');
+          await client.query('COMMIT');
+          return { submission_id: body.submission_id, received_at: existing.received_at, duplicate: true };
+        }
+        const params = [];
+        const values = body.responses.map((r, i) => {
+          const row = responseRow(body.submission_id, r, i);
+          const placeholders = row.map((_, j) => `$${params.length + j + 1}`);
+          params.push(...row);
+          return `(${placeholders.join(', ')})`;
+        });
+        await client.query(`INSERT INTO responses VALUES ${values.join(', ')}`, params);
+        await client.query('COMMIT');
+        return { submission_id: body.submission_id, received_at: receivedAt, duplicate: false };
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => { broken = true; });
+        throw error;
+      } finally { client.release(broken); }
+    },
+    async exportRows() { return (await pool.query(EXPORT_QUERY)).rows; },
+    async close() { await pool.end(); },
   };
 }

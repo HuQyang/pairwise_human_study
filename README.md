@@ -24,7 +24,7 @@ Keep `id` stable for a study and increment `version` when changing questions, co
 
 ## Database and researcher export
 
-The server creates `data/study.sqlite` automatically, or uses `DATABASE_PATH` from `.env`:
+Locally, the server creates `data/study.sqlite` automatically, or uses `DATABASE_PATH` from `.env`. If `DATABASE_URL` is set to a Postgres connection string (e.g. Neon or Supabase), the server uses that database instead and creates the same tables on startup:
 
 - `submissions`: anonymous UUID, study ID/version, server receipt time and payload hash.
 - `responses`: one row per answer, with submission ID, displayed answer order, sample/question, left/right methods, choice, preferred method, timestamp and response time.
@@ -37,6 +37,14 @@ Researchers can export all collected responses on the backend machine:
 npm run --silent export:results > results.csv
 ```
 
+To export from hosted Postgres on your own computer, pass its connection string (from Neon/Supabase):
+
+```bash
+DATABASE_URL='postgresql://...' npm run --silent export:results > results.csv
+```
+
+The Neon/Supabase web console can also browse the `responses` table and download it as CSV.
+
 There is no public API for reading or exporting results. Do not commit or publish the database or exports. Back up SQLite using its backup facility, or stop the server before copying the database (WAL files may contain recent transactions).
 
 ## Deploy frontend and backend together
@@ -47,6 +55,17 @@ HOST=0.0.0.0 npm start
 ```
 
 The backend serves both `/api/submissions` and the built frontend from `dist/`. Open `http://localhost:3001/pairwise_human_study/`. Use an HTTPS reverse proxy for public access and a persistent writable volume for `DATABASE_PATH`, for example `/var/lib/pairwise-study/study.sqlite`. Run one backend instance with this SQLite file; ephemeral or read-only serverless filesystems will not retain results. `npm run preview` only previews static files and does not run the API.
+
+## Deploy the backend on Render's free tier
+
+Render's free instances have no persistent disk, so a SQLite file there is erased on every deploy, restart and sleep. Store responses in a free hosted Postgres database instead:
+
+1. Create a Postgres database on [Neon](https://neon.tech) or [Supabase](https://supabase.com) and copy its connection string (keep `?sslmode=require`).
+2. On the Render web service, set **Build Command** `npm install && npm run build` and **Start Command** `npm start`.
+3. Under **Environment**, set `DATABASE_URL` to that connection string and `ALLOWED_ORIGINS=https://YOUR-USERNAME.github.io`. The server binds `0.0.0.0` automatically on Render (`HOST` can also be set explicitly).
+4. Check `https://YOUR-SERVICE.onrender.com/api/health` returns `{"ok":true}`.
+
+Free Render services sleep after about 15 minutes without traffic and take up to a minute to wake. The survey pings `/api/health` when it opens and every 10 minutes, and waits up to 60 seconds when submitting.
 
 ## Keep the frontend on GitHub Pages
 
@@ -74,4 +93,4 @@ npm test
 npm run build
 ```
 
-Tests cover real API/database writes, atomic validation, retries, conflicting submissions, CORS, body limits, persistence, CSV export, and frontend receipt verification.
+Tests run against both SQLite and Postgres (via PGlite) and cover real API/database writes, atomic validation, retries, conflicting submissions, CORS, body limits, persistence, CSV export, and frontend receipt verification.

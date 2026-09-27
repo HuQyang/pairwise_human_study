@@ -50,7 +50,7 @@ export function createApp({ store, allowedOrigins = [], distDir = resolve('dist'
         let body;
         try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
         catch { throw new RequestError(400, 'Invalid JSON.'); }
-        const receipt = store.save(body);
+        const receipt = await store.save(body);
         return json(res, receipt.duplicate ? 200 : 201, receipt);
       }
       if (!['GET', 'HEAD'].includes(req.method)) throw new RequestError(405, 'Method not allowed.');
